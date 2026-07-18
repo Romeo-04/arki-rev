@@ -1,4 +1,4 @@
-"""ArkiRev backend package."""
+"""ArkiRev application package."""
 
 from arkirev.models import ChangeItem, RevisionAnalysis, ScheduleResult, Task
 from arkirev.workflow import run_revision_workflow
