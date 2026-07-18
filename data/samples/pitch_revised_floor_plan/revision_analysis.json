@@ -1,0 +1,34 @@
+{
+  "changes": [
+    {
+      "summary": "Add pass-through opening between living room and kitchen",
+      "category": "new_opening",
+      "severity": "high",
+      "trade": "structural",
+      "verify_before_build": true,
+      "bbox": [640, 260, 90, 120]
+    },
+    {
+      "summary": "Move bedroom door clear of revised partition",
+      "category": "door_move",
+      "severity": "medium",
+      "trade": "carpentry",
+      "verify_before_build": true,
+      "bbox": [185, 510, 205, 115]
+    },
+    {
+      "summary": "Relocate kitchen sink and associated rough-in",
+      "category": "equipment_or_fixture_change",
+      "severity": "medium",
+      "trade": "mep",
+      "verify_before_build": true,
+      "bbox": [770, 205, 245, 80]
+    }
+  ],
+  "field_brief": "Rev B changes the approved plan with a new structural opening, a shifted bedroom door, and a relocated kitchen rough-in.",
+  "risks": [
+    "Confirm structural sign-off before cutting the opening.",
+    "Verify MEP rough-in location before closing finishes.",
+    "Check bedroom door swing and clearance after relocation."
+  ]
+}

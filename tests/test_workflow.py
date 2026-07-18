@@ -70,6 +70,27 @@ def test_workflow_returns_ui_ready_budget_and_schedule_payload() -> None:
     ]
     assert "47,000" not in result["insights"]["summary"]
     assert "47000 at risk" in result["insights"]["summary"]
+    assert result["report"]["title"] == "Revision impact summary"
+    assert result["report"]["prediction"]["risk_level"] == "medium"
+    assert result["report"]["prediction"]["budget_at_risk"] == 47000
+    assert result["report"]["what_changed"][0]["summary"] == "Add kitchen opening"
+    assert result["report"]["what_changed"][0]["implementation_window"] == "Day 0 to Day 5.5"
+    assert result["report"]["what_changed"][0]["predicted_tasks"] == [
+        "Structural review",
+        "Mark & protect area",
+        "Cut opening",
+        "Install lintel",
+        "Frame opening",
+    ]
+    assert result["report"]["implementation_plan"]["overall_window"] == "Day 0 to Day 5.5"
+    assert result["report"]["implementation_plan"]["critical_changes"][0]["summary"] == "Add kitchen opening"
+    assert result["report"]["sections"][0] == {
+        "id": "what_changed",
+        "title": "What Changed",
+        "summary": "2 change(s) detected across: door_move, new_opening.",
+    }
+    assert "Expected impact is 47000 at risk" in result["report"]["executive_summary"]
+    assert "Verify before build: Add kitchen opening, Move bedroom door." in result["report"]["field_actions"]
 
 
 def test_workflow_accepts_revision_analysis_model() -> None:
@@ -82,6 +103,7 @@ def test_workflow_accepts_revision_analysis_model() -> None:
     assert result["impact"]["budget_at_risk"] == 5000
     assert result["schedule"]["project_duration_days"] == 0.25
     assert result["insights"]["review_required_count"] == 1
+    assert result["report"]["cost_prediction"]["budget_at_risk"] == 5000
 
 
 def test_workflow_reports_days_added_against_baseline() -> None:
@@ -97,6 +119,7 @@ def test_workflow_reports_days_added_against_baseline() -> None:
         "days_reduced": 0.0,
     }
     assert "adds 1.5 day(s) versus the baseline" in result["insights"]["summary"]
+    assert result["report"]["prediction"]["days_added"] == 1.5
 
 
 def test_workflow_reports_days_reduced_against_baseline() -> None:
@@ -112,6 +135,7 @@ def test_workflow_reports_days_reduced_against_baseline() -> None:
         "days_reduced": 1.75,
     }
     assert "reduces the plan by 1.75 day(s) versus the baseline" in result["insights"]["summary"]
+    assert result["report"]["prediction"]["days_reduced"] == 1.75
 
 
 def test_workflow_insights_handle_empty_dataset_labels() -> None:
@@ -124,6 +148,10 @@ def test_workflow_insights_handle_empty_dataset_labels() -> None:
         "No structured changes were detected, so there is no added budget or schedule impact."
     )
     assert result["insights"]["critical_trades"] == []
+    assert result["report"]["executive_summary"] == "No construction-relevant floor-plan changes were detected."
+    assert result["report"]["field_actions"] == [
+        "No field action required until a construction-relevant change is identified."
+    ]
 
 
 def test_workflow_surfaces_invalid_change_data() -> None:
