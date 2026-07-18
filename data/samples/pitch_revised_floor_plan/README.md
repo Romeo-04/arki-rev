@@ -42,7 +42,7 @@ The archive dataset labels are object-detection boxes, not true revision
 ground truth. In the MVP, real change boxes should come from either:
 
 1. comparing approved Rev A against uploaded Rev B with the vision assistant, or
-2. user-drawn markup boxes from the canvas.
+2. a reviewed revision-analysis payload from the project team.
 
-`annotate_revised_plan(...)` can then draw those detected or user-marked
-changes onto the revised floor plan as the output image.
+`annotate_revised_plan(...)` then draws the detected changes onto the revised
+floor plan as the output image.

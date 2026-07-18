@@ -2,7 +2,7 @@
 
 ArkiRev turns a marked-up approved floor plan into a field brief, per-trade budget exposure, and a critical-path construction sequence.
 
-## Run the Person B demo
+## Run the app
 
 ```powershell
 python -m venv .venv
@@ -11,14 +11,11 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The Streamlit version is intentionally pinned to the 1.32 release line because
-`streamlit-drawable-canvas` 0.9.3 is not compatible with newer Streamlit image
-internals.
+Open the local URL Streamlit prints, then upload the approved floor plan first.
+The revised-plan upload appears after that. Once both drawings are selected,
+ArkiRev automatically generates an annotated plan, a site-ready change register,
+and budget and programme impacts.
 
-Open the local URL Streamlit prints. Start from **Structured changes** for the demo-safe flow, or use **Draw on plan** to create labelled rectangles directly on the included `RevA.png`. **Use mock changes** in the sidebar is a no-dependency fallback.
-
-## Integration seam
-
-This app/UX stream includes `arkirev/_stubs.py`, which supplies the frozen `build_tasks`, `compute_cpm`, and `estimate_impact` shapes until the engine stream lands. Add Person A's `models.py`, `schedule.py`, `budget.py`, `project_budget.json`, and `task_templates.json`; `app.py` automatically uses them when all are present.
-
-Vision-assisted Rev B comparison is deliberately optional. See [the demo script](docs/DEMO_SCRIPT.md) for the presentation flow.
+For the pitch pair, use the files in
+[`data/samples/pitch_revised_floor_plan`](data/samples/pitch_revised_floor_plan/README.md).
+Use [the demo script](docs/DEMO_SCRIPT.md) for the presentation flow.
