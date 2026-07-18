@@ -73,7 +73,14 @@ def test_compare_revisions_accepts_provider_object() -> None:
     assert analysis.changes[0].summary == "a.png to b.png"
 
 
-def test_compare_revisions_without_provider_uses_env_backed_openai() -> None:
+def test_compare_revisions_without_provider_uses_env_backed_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def skip_dotenv() -> None:
+        return None
+
+    monkeypatch.setattr("arkirev.compare._load_dotenv_if_available", skip_dotenv)
+
     with pytest.raises(ValueError, match="OPENAI_API_KEY|OpenAI SDK is required"):
         compare_revisions("a.png", "b.png")
 
