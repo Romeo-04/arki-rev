@@ -25,9 +25,41 @@ def test_workflow_returns_ui_ready_budget_and_schedule_payload() -> None:
     assert result["impact"]["contingency"] == 4700
     assert result["impact"]["by_trade"] == {"carpentry": 12000, "structural": 35000}
     assert result["schedule"]["project_duration_days"] == 5.5
+    assert result["schedule"]["duration_change"] == {
+        "baseline_duration_days": None,
+        "duration_delta_days": None,
+        "days_added": 0.0,
+        "days_reduced": 0.0,
+    }
     assert result["schedule"]["critical_path"] == ["0:0", "0:1", "0:2", "0:3", "0:4"]
     assert result["schedule"]["tasks"][0]["id"] == "0:0"
     assert result["schedule"]["tasks"][0]["critical"] is True
+    assert result["schedule"]["change_windows"][0] == {
+        "change_index": 0,
+        "summary": "Add kitchen opening",
+        "category": "new_opening",
+        "trade": "structural",
+        "start_day": 0.0,
+        "finish_day": 5.5,
+        "implementation_days": 5.5,
+        "work_days": 5.5,
+        "build_window": "Day 0 to Day 5.5",
+        "critical": True,
+        "controls_project_finish": True,
+        "days_added_to_revision": 5.5,
+        "days_reduced_from_revision": 0.0,
+        "task_ids": ["0:0", "0:1", "0:2", "0:3", "0:4"],
+        "task_names": [
+            "Structural review",
+            "Mark & protect area",
+            "Cut opening",
+            "Install lintel",
+            "Frame opening",
+        ],
+        "critical_task_ids": ["0:0", "0:1", "0:2", "0:3", "0:4"],
+    }
+    assert result["schedule"]["change_windows"][1]["build_window"] == "Day 0 to Day 3.5"
+    assert result["schedule"]["change_windows"][1]["days_added_to_revision"] == 0.0
     assert result["insights"]["change_count"] == 2
     assert result["insights"]["highest_cost_trade"] == "structural"
     assert result["insights"]["critical_trades"] == [
@@ -52,11 +84,42 @@ def test_workflow_accepts_revision_analysis_model() -> None:
     assert result["insights"]["review_required_count"] == 1
 
 
+def test_workflow_reports_days_added_against_baseline() -> None:
+    result = run_revision_workflow(
+        [{"summary": "Add kitchen opening", "category": "new_opening", "trade": "structural"}],
+        baseline_duration_days=4,
+    )
+
+    assert result["schedule"]["duration_change"] == {
+        "baseline_duration_days": 4,
+        "duration_delta_days": 1.5,
+        "days_added": 1.5,
+        "days_reduced": 0.0,
+    }
+    assert "adds 1.5 day(s) versus the baseline" in result["insights"]["summary"]
+
+
+def test_workflow_reports_days_reduced_against_baseline() -> None:
+    result = run_revision_workflow(
+        [{"summary": "Update drawing note", "category": "dimension_or_note_change", "trade": "architecture"}],
+        baseline_duration_days=2,
+    )
+
+    assert result["schedule"]["duration_change"] == {
+        "baseline_duration_days": 2,
+        "duration_delta_days": -1.75,
+        "days_added": 0.0,
+        "days_reduced": 1.75,
+    }
+    assert "reduces the plan by 1.75 day(s) versus the baseline" in result["insights"]["summary"]
+
+
 def test_workflow_insights_handle_empty_dataset_labels() -> None:
     result = run_revision_workflow([])
 
     assert result["impact"]["budget_at_risk"] == 0
     assert result["schedule"]["project_duration_days"] == 0.0
+    assert result["schedule"]["change_windows"] == []
     assert result["insights"]["summary"] == (
         "No structured changes were detected, so there is no added budget or schedule impact."
     )
@@ -71,3 +134,8 @@ def test_workflow_surfaces_invalid_change_data() -> None:
 def test_workflow_surfaces_missing_configuration(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Budget file not found"):
         run_revision_workflow([], budget_path=tmp_path / "missing.json")
+
+
+def test_workflow_rejects_negative_baseline_duration() -> None:
+    with pytest.raises(ValueError, match="baseline_duration_days must be non-negative"):
+        run_revision_workflow([], baseline_duration_days=-1)

@@ -52,6 +52,38 @@ def test_parse_rejects_invalid_analysis_payload() -> None:
         parse_revision_analysis('{"changes": [{"summary": "x", "category": "bad"}]}')
 
 
+def test_parse_normalizes_combined_enum_values_from_live_model() -> None:
+    analysis = parse_revision_analysis(
+        """{
+          "changes": [{
+            "summary": "Door and fixture work changed",
+            "category": "door_move | equipment_or_fixture_change",
+            "severity": "medium | high",
+            "trade": "carpentry | mep"
+          }]
+        }"""
+    )
+
+    assert analysis.changes[0].category == "door_move"
+    assert analysis.changes[0].severity == "medium"
+    assert analysis.changes[0].trade == "carpentry"
+
+
+def test_parse_normalizes_trade_aliases_from_live_model() -> None:
+    analysis = parse_revision_analysis(
+        """{
+          "changes": [{
+            "summary": "Toilet plumbing moved",
+            "category": "equipment_or_fixture_change",
+            "severity": "medium",
+            "trade": "plumbing"
+          }]
+        }"""
+    )
+
+    assert analysis.changes[0].trade == "mep"
+
+
 def test_compare_revisions_uses_mock_provider_without_network() -> None:
     def provider(before_image: str, after_image: str, **_: str) -> str:
         assert before_image == "rev-a.png"

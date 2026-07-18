@@ -6,7 +6,7 @@ import mimetypes
 import os
 import re
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from pydantic import ValidationError
 
@@ -15,6 +15,32 @@ from arkirev.prompts import VISION_SYSTEM_PROMPT, VISION_USER_PROMPT
 
 ImageInput = str | Path | bytes
 DEFAULT_OPENAI_MODEL = "gpt-4o"
+ALLOWED_CATEGORIES = {
+    "door_move",
+    "new_opening",
+    "layout_change",
+    "dimension_or_note_change",
+    "equipment_or_fixture_change",
+    "unknown_change",
+}
+ALLOWED_SEVERITIES = {"low", "medium", "high"}
+ALLOWED_TRADES = {
+    "general",
+    "structural",
+    "demolition",
+    "masonry",
+    "carpentry",
+    "mep",
+    "architecture",
+}
+TRADE_ALIASES = {
+    "plumbing": "mep",
+    "electrical": "mep",
+    "mechanical": "mep",
+    "hvac": "mep",
+    "sanitary": "mep",
+    "architectural": "architecture",
+}
 
 
 class VisionProvider(Protocol):
@@ -152,9 +178,82 @@ def _extract_json(raw_response: str) -> str:
 
 def _validate_analysis(payload: dict[str, Any]) -> RevisionAnalysis:
     try:
-        return RevisionAnalysis.model_validate(payload)
+        return RevisionAnalysis.model_validate(_normalize_analysis_payload(payload))
     except ValidationError as exc:
         raise ValueError(f"Invalid RevisionAnalysis payload: {exc}") from exc
+
+
+def _normalize_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    changes = normalized.get("changes")
+    if not isinstance(changes, list):
+        return normalized
+
+    normalized_changes: list[Any] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            normalized_changes.append(change)
+            continue
+        normalized_change = dict(change)
+        if "category" in normalized_change:
+            normalized_change["category"] = _normalize_enum_value(
+                normalized_change["category"],
+                ALLOWED_CATEGORIES,
+                fallback="unknown_change",
+            )
+        if "severity" in normalized_change:
+            normalized_change["severity"] = _normalize_enum_value(
+                normalized_change["severity"],
+                ALLOWED_SEVERITIES,
+                fallback="medium",
+            )
+        if "trade" in normalized_change:
+            normalized_change["trade"] = _normalize_enum_value(
+                normalized_change["trade"],
+                ALLOWED_TRADES,
+                fallback="general",
+                aliases=TRADE_ALIASES,
+            )
+        normalized_changes.append(normalized_change)
+
+    normalized["changes"] = normalized_changes
+    return normalized
+
+
+def _normalize_enum_value(
+    value: Any,
+    allowed: set[str],
+    *,
+    fallback: str,
+    aliases: Mapping[str, str] | None = None,
+) -> Any:
+    if not isinstance(value, str):
+        return value
+
+    cleaned = value.strip().lower().replace("-", "_")
+    exact = cleaned.replace(" ", "_")
+    if exact in allowed:
+        return exact
+    if aliases and exact in aliases:
+        return aliases[exact]
+
+    if not re.search(r"[|,/;]", cleaned):
+        return value
+
+    candidates = [
+        part.strip().replace(" ", "_")
+        for part in re.split(r"[|,/;]+", cleaned)
+    ]
+    for candidate in candidates:
+        if candidate in allowed:
+            return candidate
+        if aliases and candidate in aliases:
+            return aliases[candidate]
+
+    if not cleaned:
+        return fallback
+
+    return value
 
 
 def _load_dotenv_if_available() -> None:
