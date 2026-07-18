@@ -1,0 +1,28 @@
+{
+  "new_opening": [
+    {"name": "Structural review", "trade": "structural", "duration_days": 1, "after": []},
+    {"name": "Mark & protect area", "trade": "general", "duration_days": 0.5, "after": [0]},
+    {"name": "Cut opening", "trade": "demolition", "duration_days": 1, "after": [1]},
+    {"name": "Install lintel", "trade": "structural", "duration_days": 1, "after": [2]},
+    {"name": "Frame opening", "trade": "carpentry", "duration_days": 2, "after": [3]}
+  ],
+  "door_move": [
+    {"name": "Close old opening", "trade": "masonry", "duration_days": 1, "after": []},
+    {"name": "Cut new opening", "trade": "demolition", "duration_days": 1, "after": [0]},
+    {"name": "Frame & hang door", "trade": "carpentry", "duration_days": 1.5, "after": [1]}
+  ],
+  "layout_change": [
+    {"name": "Re-layout walls", "trade": "general", "duration_days": 1, "after": []},
+    {"name": "Build/remove partition", "trade": "masonry", "duration_days": 2, "after": [0]}
+  ],
+  "dimension_or_note_change": [
+    {"name": "Update field drawings", "trade": "architecture", "duration_days": 0.25, "after": []}
+  ],
+  "equipment_or_fixture_change": [
+    {"name": "Confirm spec & MEP rough-in", "trade": "mep", "duration_days": 1, "after": []},
+    {"name": "Install fixture", "trade": "mep", "duration_days": 1, "after": [0]}
+  ],
+  "unknown_change": [
+    {"name": "Investigate & scope", "trade": "general", "duration_days": 0.5, "after": []}
+  ]
+}

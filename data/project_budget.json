@@ -1,0 +1,16 @@
+{
+  "project_name": "Demo House - Phase 1",
+  "currency": "PHP",
+  "allotted_budget": 1000000,
+  "actual_spent": 320000,
+  "contingency_pct": 10,
+  "manual_review_minutes_baseline": 30,
+  "unit_costs": {
+    "door_move": 12000,
+    "new_opening": 35000,
+    "layout_change": 25000,
+    "dimension_or_note_change": 5000,
+    "equipment_or_fixture_change": 18000,
+    "unknown_change": 10000
+  }
+}
