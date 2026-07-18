@@ -1,0 +1,25 @@
+{
+  "changes": [
+    {
+      "summary": "Revise single door opening and swing",
+      "category": "door_move",
+      "severity": "medium",
+      "trade": "carpentry",
+      "verify_before_build": true,
+      "bbox": [278.32, 102.13, 316.72, 120.48]
+    },
+    {
+      "summary": "Adjust stair and upper wall clearance",
+      "category": "layout_change",
+      "severity": "medium",
+      "trade": "general",
+      "verify_before_build": true,
+      "bbox": [100.11, 0.0, 539.89, 139.32]
+    }
+  ],
+  "field_brief": "The revised floor plan changes the right-side door opening and adjusts the upper wall clearance.",
+  "risks": [
+    "Verify the revised door swing does not conflict with adjacent circulation.",
+    "Confirm the adjusted wall clearance before site layout."
+  ]
+}

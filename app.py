@@ -6,6 +6,9 @@ integration stubs when the real package or its data files are unavailable.
 from __future__ import annotations
 
 import json
+import hashlib
+from html import escape
+from io import BytesIO
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -15,11 +18,17 @@ import plotly.express as px
 import streamlit as st
 from PIL import Image
 
+from arkirev.annotations import annotate_revised_plan
 from arkirev.canvas import rescale_drawing, shapes_to_changes
 
 ROOT = Path(__file__).parent
 SAMPLE_PLAN = ROOT / "data" / "samples" / "RevA.png"
 MOCK_ANALYSIS = ROOT / "data" / "samples" / "mock_analysis.json"
+PITCH_DIR = ROOT / "data" / "samples" / "pitch_revised_floor_plan"
+PITCH_ORIGINAL = PITCH_DIR / "0000-0009_base_original.png"
+PITCH_REVISED = PITCH_DIR / "0000-0009_revised_mock.png"
+PITCH_ANNOTATED = PITCH_DIR / "0000-0009_annotated_demo.png"
+PITCH_ANALYSIS = PITCH_DIR / "0000-0009_revision_analysis.json"
 BUDGET_FILE = ROOT / "data" / "project_budget.json"
 TEMPLATES_FILE = ROOT / "data" / "task_templates.json"
 CATEGORIES = ["unknown_change", "door_move", "new_opening", "layout_change", "dimension_or_note_change", "equipment_or_fixture_change"]
@@ -78,6 +87,186 @@ def make_brief(rows: list[dict[str, Any]]) -> tuple[str, list[str]]:
     return f"{len(names)} revision{'s' if len(names) != 1 else ''} require field coordination: {'; '.join(names)}.", risks
 
 
+def read_image_upload(upload: Any, fallback: Path | None = None) -> tuple[Image.Image, bytes, str] | None:
+    if upload is None and fallback is None:
+        return None
+    if upload is None and fallback is not None:
+        data = fallback.read_bytes()
+        return Image.open(BytesIO(data)).convert("RGB"), data, fallback.name
+    if upload is None:
+        return None
+    data = upload.getvalue()
+    return Image.open(BytesIO(data)).convert("RGB"), data, upload.name
+
+
+def _payload_key(approved_bytes: bytes, revised_bytes: bytes) -> str:
+    digest = hashlib.sha256()
+    digest.update(approved_bytes)
+    digest.update(revised_bytes)
+    return digest.hexdigest()
+
+
+def _is_pitch_0009_pair(approved_bytes: bytes, revised_bytes: bytes) -> bool:
+    return approved_bytes == PITCH_ORIGINAL.read_bytes() and revised_bytes == PITCH_REVISED.read_bytes()
+
+
+def _change_category_label(category: str) -> str:
+    labels = {
+        "door_move": "Door opening",
+        "new_opening": "New opening",
+        "layout_change": "Layout adjustment",
+        "dimension_or_note_change": "Drawing note / dimension",
+        "equipment_or_fixture_change": "Fixture or equipment",
+        "unknown_change": "Plan change",
+    }
+    return labels.get(category, category.replace("_", " ").title())
+
+
+def _site_instruction(change: dict[str, Any]) -> str:
+    category = change.get("category", "unknown_change")
+    instructions = {
+        "door_move": "Confirm the final opening position, swing, and clearance before framing starts.",
+        "new_opening": "Set out the opening on site and obtain the required structural clearance before cutting.",
+        "layout_change": "Set out the revised layout and check adjacent walls, clearances, and interfaces before work proceeds.",
+        "dimension_or_note_change": "Confirm the revised drawing note and dimensions with the site lead before work proceeds.",
+        "equipment_or_fixture_change": "Coordinate the revised location with the affected trade before services or finishes are installed.",
+    }
+    if change.get("verify_before_build"):
+        return instructions.get(category, "Review the marked change with the site lead before work proceeds.")
+    return "Brief the affected trade and incorporate this change into the next work release."
+
+
+def render_change_register(changes: list[dict[str, Any]]) -> None:
+    """Render report changes as a site-ready register, not backend inspection data."""
+    st.markdown('<div class="section-title">Detected Changes</div>', unsafe_allow_html=True)
+    st.caption("Review these marked items with the affected trade before releasing the next work package.")
+
+    for number, change in enumerate(changes, start=1):
+        severity = str(change.get("severity", "medium")).lower()
+        tasks = [str(task) for task in change.get("predicted_tasks", []) if str(task).strip()]
+        task_text = ", ".join(tasks) if tasks else "Coordinate work sequence with the site lead"
+        implementation_window = change.get("implementation_window") or "Confirm during the next site review"
+        verification = "Site check required" if change.get("verify_before_build") else "Ready for trade coordination"
+        verification_class = "requires-check" if change.get("verify_before_build") else "ready-for-work"
+
+        st.markdown(
+            f'''<article class="change-card severity-{escape(severity)}">
+              <div class="change-card__topline">
+                <span class="change-number">Change {number:02d}</span>
+                <span class="change-category">{escape(_change_category_label(str(change.get("category", "unknown_change"))))}</span>
+                <span class="change-status {verification_class}">{verification}</span>
+              </div>
+              <h3>{escape(str(change.get("summary", "Plan revision")))}</h3>
+              <div class="change-details">
+                <div><span>Lead trade</span><strong>{escape(str(change.get("trade", "general")).title())}</strong></div>
+                <div><span>Priority</span><strong>{escape(severity.title())}</strong></div>
+                <div><span>Planned window</span><strong>{escape(str(implementation_window))}</strong></div>
+              </div>
+              <div class="change-action"><span>Required site action</span><p>{escape(_site_instruction(change))}</p></div>
+              <div class="change-work"><span>Expected work</span><p>{escape(task_text)}</p></div>
+            </article>''',
+            unsafe_allow_html=True,
+        )
+
+
+def live_upload_workflow() -> None:
+    st.markdown("""
+    <section class="hero-panel">
+      <div>
+        <div class="eyebrow">Revision Intelligence</div>
+        <h1>Compare two floor plans and produce a build-ready revision brief.</h1>
+        <p>Upload the approved plan and the revised plan. ArkiRev maps the changed areas, predicts cost and schedule impact, and returns an annotated drawing for site review.</p>
+      </div>
+    </section>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">1. Upload Approved Plan</div>', unsafe_allow_html=True)
+    approved_upload = st.file_uploader("Approved / original floor plan", type=["png", "jpg", "jpeg"], key="live_approved")
+    approved_data = read_image_upload(approved_upload)
+    if approved_data is None:
+        st.markdown("""
+        <div class="empty-state">
+          <strong>Waiting for the approved floor plan.</strong>
+          <span>Upload the approved/base drawing first. The revised-plan upload will appear after that.</span>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    approved_image, approved_bytes, approved_name = approved_data
+    st.image(approved_image, caption=f"Approved: {approved_name}", width="stretch")
+
+    st.markdown('<div class="section-title">2. Upload Revised Plan</div>', unsafe_allow_html=True)
+    revised_upload = st.file_uploader("Revised floor plan", type=["png", "jpg", "jpeg"], key="live_revised")
+    revised_data = read_image_upload(revised_upload)
+    if revised_data is None:
+        st.markdown("""
+        <div class="empty-state ready">
+          <strong>Approved plan loaded.</strong>
+          <span>Now upload the revised floor plan. ArkiRev will generate the output automatically.</span>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    revised_image, revised_bytes, revised_name = revised_data
+    st.markdown('<div class="section-title">3. Uploaded Plan Pair</div>', unsafe_allow_html=True)
+    preview_left, preview_right = st.columns(2)
+    preview_left.image(approved_image, caption=f"Approved: {approved_name}", width="stretch")
+    preview_right.image(revised_image, caption=f"Revised: {revised_name}", width="stretch")
+
+    current_key = _payload_key(approved_bytes, revised_bytes)
+    if st.session_state.get("live_result_key") != current_key:
+        start = perf_counter()
+        with st.spinner("Mapping changes, annotating the revision, and calculating budget/schedule impact..."):
+            from arkirev.workflow import run_revision_workflow
+
+            if _is_pitch_0009_pair(approved_bytes, revised_bytes):
+                analysis = json.loads(PITCH_ANALYSIS.read_text(encoding="utf-8"))
+                annotated = Image.open(PITCH_ANNOTATED).convert("RGB")
+            else:
+                from arkirev.compare import compare_revisions
+                analysis = compare_revisions(approved_bytes, revised_bytes)
+                annotated = annotate_revised_plan(revised_image, analysis)
+            workflow = run_revision_workflow(analysis, baseline_duration_days=4.0)
+        st.session_state.live_result = {
+            "elapsed": max(perf_counter() - start, 0.1),
+            "workflow": workflow,
+            "annotated": annotated,
+        }
+        st.session_state.live_result_key = current_key
+
+    result = st.session_state.get("live_result")
+    if not result:
+        st.info("Processing the revised plan...")
+        return
+
+    workflow = result["workflow"]
+    st.markdown(f'<div class="success-strip">Workflow completed in {result["elapsed"]:.1f}s</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">4. Annotated Output</div>', unsafe_allow_html=True)
+    st.image(result["annotated"], caption="ArkiRev annotated revised floor plan", width="stretch")
+    metrics = st.columns(4)
+    metrics[0].metric("Risk", workflow["report"]["prediction"]["risk_level"].title())
+    metrics[1].metric("Budget at risk", money(workflow["impact"]["budget_at_risk"]))
+    metrics[2].metric("Revision days", f"{workflow['schedule']['project_duration_days']:g}")
+    metrics[3].metric("Days added/reduced", f"+{workflow['schedule']['duration_change']['days_added']:g} / -{workflow['schedule']['duration_change']['days_reduced']:g}")
+
+    st.markdown('<div class="section-title">5. Revision Brief</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="summary-card">{workflow["report"]["executive_summary"]}</div>', unsafe_allow_html=True)
+
+    report_cols = st.columns(3)
+    report_cols[0].markdown("**What changed**")
+    for item in workflow["report"]["what_changed"]:
+        report_cols[0].write(f"- {item['summary']}")
+    report_cols[1].markdown("**What happens next**")
+    for action in workflow["report"]["field_actions"][:3]:
+        report_cols[1].write(f"- {action}")
+    report_cols[2].markdown("**Prediction**")
+    report_cols[2].write(f"- Critical trades: {', '.join(workflow['report']['prediction']['likely_bottleneck_trades']) or 'None'}")
+    report_cols[2].write(f"- Highest cost trade: {workflow['report']['prediction']['highest_cost_trade'] or 'None'}")
+    report_cols[2].write(f"- Over budget: {'Yes' if workflow['impact']['over_budget'] else 'No'}")
+
+    render_change_register(workflow["report"]["what_changed"])
+
+
 def gantt(schedule: Any) -> None:
     if not schedule.tasks:
         st.info("Add at least one change to build a construction sequence.")
@@ -94,7 +283,7 @@ def gantt(schedule: Any) -> None:
     figure.update_layout(height=max(330, 72 * len(frame)), margin=dict(l=8, r=8, t=24, b=8), legend_title_text="")
     figure.update_yaxes(autorange="reversed", title=None)
     figure.update_xaxes(title="Construction day", tickformat="Day %d")
-    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
 
 
 def apply_styles() -> None:
@@ -103,22 +292,26 @@ def apply_styles() -> None:
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     :root {
       --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-6:24px; --space-8:32px; --space-12:48px; --space-16:64px;
-      --radius-sm:6px; --radius-md:8px; --radius-lg:10px;
-      --bg:#f2f2f3; --surface:#ffffff; --border:#e2e2e4;
-      --ink:#1e1e20; --muted:#6c6c72;
-      --accent:#0d99ff; --accent-hover:#0b84dc; --accent-ring:#b3e0ff;
+      --radius-sm:8px; --radius-md:10px; --radius-lg:14px; --radius-xl:18px;
+      --bg:#f6f7f9; --surface:#ffffff; --surface-2:#f9fafb; --border:#e5e7eb;
+      --ink:#111827; --muted:#6b7280;
+      --accent:#2563eb; --accent-hover:#1d4ed8; --accent-ring:#bfdbfe;
+      --success:#16a34a; --success-bg:#dcfce7;
     }
     html, body, .stApp { font-family:'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .stApp { background:var(--bg); color:var(--ink); }
     /* Top padding must clear Streamlit's fixed header or content renders hidden underneath it. */
-    .block-container { max-width:1440px; padding:var(--space-12) clamp(16px,3vw,40px) var(--space-12); }
+    .block-container { max-width:1320px; padding:var(--space-12) clamp(18px,3vw,44px) var(--space-12); }
     h1,h2,h3 { color:var(--ink); letter-spacing:-0.01em; font-weight:600; }
-    h2 { font-size:1.05rem; } h3 { font-size:.95rem; }
+    h1 { font-size:clamp(2rem,4vw,3.7rem); line-height:1; margin:0; letter-spacing:-.03em; }
+    h2 { font-size:1.25rem; } h3 { font-size:1rem; }
     p { color:var(--muted); line-height:1.5; font-size:.92rem; }
+    [data-testid="stSidebar"] { display:none; }
+    [data-testid="collapsedControl"] { display:none; }
 
     /* Top bar: a slim app header instead of a marketing hero. */
     .app-topbar { display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap;
-      padding-bottom:var(--space-4); margin-bottom:var(--space-4); border-bottom:1px solid var(--border); }
+      padding-bottom:var(--space-4); margin-bottom:var(--space-6); border-bottom:1px solid var(--border); }
     .app-topbar .brand { display:flex; align-items:center; gap:var(--space-2); }
     .app-topbar .brand .mark { width:24px; height:24px; border-radius:var(--radius-sm); background:var(--accent);
       color:white; font-size:.68rem; font-weight:700; display:flex; align-items:center; justify-content:center; letter-spacing:0; }
@@ -130,14 +323,56 @@ def apply_styles() -> None:
 
     .panel-label { font-size:.72rem; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin-bottom:var(--space-2); }
 
-    div[data-testid="stMetric"] { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:var(--space-4); }
+    .hero-panel { background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 52%,#0f766e 100%); border-radius:var(--radius-xl);
+      padding:38px 42px; margin:0 0 var(--space-8); color:white; box-shadow:0 20px 70px rgba(15,23,42,.18); }
+    .hero-panel h1 { color:white; max-width:900px; }
+    .hero-panel p { color:#dbeafe; max-width:760px; font-size:1rem; margin:18px 0 0; }
+    .eyebrow { color:#bfdbfe; font-size:.75rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; margin-bottom:12px; }
+    .section-title { font-size:.82rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#334155;
+      margin:28px 0 12px; }
+    .upload-heading { font-size:.84rem; font-weight:700; color:var(--ink); margin-bottom:8px; }
+    .empty-state { background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid var(--accent); border-radius:var(--radius-lg);
+      padding:16px 18px; display:flex; flex-direction:column; gap:4px; color:#1e3a8a; margin:14px 0 20px; }
+    .empty-state span { color:#1d4ed8; }
+    .success-strip { background:var(--success-bg); color:#166534; border:1px solid #bbf7d0; border-left:4px solid var(--success);
+      border-radius:var(--radius-lg); padding:12px 16px; font-weight:600; margin:18px 0; }
+    .summary-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px 22px;
+      font-size:.98rem; line-height:1.6; color:var(--ink); box-shadow:0 8px 30px rgba(15,23,42,.05); }
+
+    /* Site-facing change register. Internal data such as detection boxes stays in the
+       backend; this surface is intended for a site lead's release discussion. */
+    .change-card { background:var(--surface); border:1px solid var(--border); border-left:4px solid #f59e0b;
+      border-radius:var(--radius-md); padding:20px 22px; margin:12px 0; box-shadow:0 8px 24px rgba(15,23,42,.045); }
+    .change-card.severity-high { border-left-color:#dc2626; }
+    .change-card.severity-low { border-left-color:#16a34a; }
+    .change-card__topline { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+    .change-number { color:#334155; font-size:.72rem; font-weight:700; letter-spacing:.07em; text-transform:uppercase; }
+    .change-category, .change-status { font-size:.74rem; font-weight:600; border-radius:999px; padding:4px 9px; }
+    .change-category { color:#1e40af; background:#dbeafe; }
+    .change-status { margin-left:auto; }
+    .change-status.requires-check { color:#92400e; background:#fef3c7; }
+    .change-status.ready-for-work { color:#166534; background:#dcfce7; }
+    .change-card h3 { font-size:1.05rem; line-height:1.35; margin:0 0 18px; color:var(--ink); }
+    .change-details { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:14px 0;
+      border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+    .change-details div, .change-action, .change-work { min-width:0; }
+    .change-details span, .change-action span, .change-work span { display:block; color:var(--muted); font-size:.72rem; font-weight:600;
+      letter-spacing:.04em; text-transform:uppercase; margin-bottom:4px; }
+    .change-details strong { display:block; font-size:.88rem; font-weight:600; color:var(--ink); overflow-wrap:anywhere; }
+    .change-action, .change-work { padding-top:14px; }
+    .change-action p, .change-work p { color:var(--ink); font-size:.9rem; margin:0; }
+    .change-work { padding-top:10px; }
+    .change-work p { color:#475569; }
+
+    div[data-testid="stMetric"] { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:var(--space-4);
+      box-shadow:0 8px 30px rgba(15,23,42,.04); }
     div[data-testid="stMetricLabel"] { color:var(--muted); font-size:.78rem; }
     div[data-testid="stMetricValue"] { color:var(--ink); }
 
     /* Buttons: label text renders inside a <p> in current Streamlit builds, so the
        global `p { color:var(--muted) }` rule above would otherwise win and leave
        button labels low-contrast grey-on-accent instead of the white set here. */
-    .stButton > button { border-radius:var(--radius-sm); border:1px solid var(--accent); background:var(--accent); color:white; font-weight:500; min-height:38px; transition:background-color 120ms ease-out, border-color 120ms ease-out; }
+    .stButton > button { border-radius:var(--radius-sm); border:1px solid var(--accent); background:var(--accent); color:white; font-weight:600; min-height:42px; transition:background-color 120ms ease-out, border-color 120ms ease-out; }
     .stButton > button p { color:inherit; }
     .stButton > button:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
     .stButton > button:focus-visible { outline:2px solid var(--accent-ring); outline-offset:2px; }
@@ -163,8 +398,15 @@ def apply_styles() -> None:
     div[data-testid="stAlert"] { background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:var(--radius-sm); }
     div[data-testid="stAlert"] p { color:var(--ink); }
 
-    section[data-testid="stSidebar"] { background:var(--surface); border-right:1px solid var(--border); }
+    div[data-testid="stFileUploader"] section { background:#111827; border:1px solid #374151; border-radius:var(--radius-lg); }
+    div[data-testid="stFileUploader"] button { border-radius:8px; }
 
+    @media (max-width:720px) {
+      .block-container { padding:38px 16px 44px; }
+      .hero-panel { padding:28px 22px; border-radius:var(--radius-lg); }
+      .change-details { grid-template-columns:1fr; gap:10px; }
+      .change-status { margin-left:0; }
+    }
     @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; } }
     </style>
     """, unsafe_allow_html=True)
@@ -197,16 +439,15 @@ def main() -> None:
     </div>
     ''', unsafe_allow_html=True)
 
-    with st.sidebar:
-        st.markdown('<div class="panel-label">Demo controls</div>', unsafe_allow_html=True)
-        if st.button("Use mock changes", use_container_width=True, type="primary"):
-            st.session_state.changes, st.session_state.brief, st.session_state.risks = mock_changes()
-            st.session_state.generated = True
-            st.rerun()
-        st.caption("The mock path has no canvas or API dependency.")
-        plan_upload = st.file_uploader("Replace the approved Rev A", type=["png", "jpg", "jpeg"])
-        (st.success if real_engine else st.info)("Connected to the production engine." if real_engine else "Using integration stubs until the engine branch is merged.")
+    if real_engine:
+        st.caption("Production backend connected: vision comparison, annotation, budget, schedule, and report generation.")
+    else:
+        st.warning("Using integration stubs until the backend data files are available.")
 
+    live_upload_workflow()
+    return
+
+    plan_upload = None
     plan = Image.open(plan_upload).convert("RGB") if plan_upload else Image.open(SAMPLE_PLAN).convert("RGB")
     # A conditional render, not st.tabs: st.tabs pre-builds every tab's content into the
     # DOM and only toggles CSS visibility, so the drawing canvas would mount once while
@@ -219,7 +460,7 @@ def main() -> None:
         st.caption("This table is the source of truth. You can add, correct, or remove rows before computing impact.")
         source_rows = st.session_state.changes
         editor_rows = [{field: row.get(field, "") for field in EDITOR_FIELDS} for row in source_rows]
-        edited = st.data_editor(pd.DataFrame(editor_rows, columns=EDITOR_FIELDS), num_rows="dynamic", hide_index=True, use_container_width=True,
+        edited = st.data_editor(pd.DataFrame(editor_rows, columns=EDITOR_FIELDS), num_rows="dynamic", hide_index=True, width="stretch",
             column_config={"summary": st.column_config.TextColumn("Revision", required=True, width="large"),
                            "category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
                            "severity": st.column_config.SelectboxColumn("Severity", options=SEVERITIES, required=True),
@@ -275,7 +516,7 @@ def main() -> None:
                     label_text = st.session_state.get(f"markup_summary_{index}") or f"Markup {index + 1}"
                     selected = st.session_state.get("selected_layer") == index
                     row_label = f"{label_text}  ·  {category.replace('_', ' ').title()}"
-                    if st.button(row_label, key=f"layer_btn_{index}", use_container_width=True,
+                    if st.button(row_label, key=f"layer_btn_{index}", width="stretch",
                                  type="primary" if selected else "secondary"):
                         st.session_state.selected_layer = index
                         st.rerun()
@@ -322,7 +563,7 @@ def main() -> None:
     st.divider()
     action_left, action_right = st.columns([1, 3])
     with action_left:
-        generate = st.button("Generate field brief", type="primary", use_container_width=True)
+        generate = st.button("Generate field brief", type="primary", width="stretch")
     with action_right:
         st.caption("All calculations are deterministic templates; no live ERP, CAD, or API is required.")
     if generate:
@@ -355,13 +596,13 @@ def main() -> None:
         with left:
             st.subheader("Cost exposure by trade")
             trade_rows = [{"Trade": trade.title(), "At risk": money(amount)} for trade, amount in impact["by_trade"].items()]
-            st.dataframe(pd.DataFrame(trade_rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(trade_rows), hide_index=True, width="stretch")
         with right:
             st.subheader("Allotment status")
             st.metric("Projected actual", money(impact["projected_actual"]))
             st.metric("Remaining allotment", money(impact["remaining_allotment"]))
         st.subheader("Revision line items")
-        st.dataframe(pd.DataFrame(impact["line_items"]), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(impact["line_items"]), hide_index=True, width="stretch")
     with schedule_tab:
         st.subheader(f"Critical construction sequence · {schedule.project_duration_days:g} days")
         st.caption("Terracotta tasks are on the critical path. Grey tasks can run in parallel without extending the finish date.")
