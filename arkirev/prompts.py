@@ -24,9 +24,9 @@ The JSON must match this shape:
   "changes": [
     {
       "summary": "short field-ready summary",
-      "category": "door_move | new_opening | layout_change | dimension_or_note_change | equipment_or_fixture_change | unknown_change",
-      "severity": "low | medium | high",
-      "trade": "general | structural | demolition | masonry | carpentry | mep | architecture",
+      "category": "one allowed category",
+      "severity": "one allowed severity",
+      "trade": "one allowed trade",
       "verify_before_build": true,
       "bbox": [left, top, width, height]
     }
@@ -34,6 +34,10 @@ The JSON must match this shape:
   "field_brief": "brief summary for site review",
   "risks": ["risk text"]
 }
+Allowed category values: door_move, new_opening, layout_change, dimension_or_note_change, equipment_or_fixture_change, unknown_change.
+Allowed severity values: low, medium, high.
+Allowed trade values: general, structural, demolition, masonry, carpentry, mep, architecture.
+Each category, severity, and trade field must contain exactly one allowed value. Do not combine values with pipes, commas, slashes, or prose.
 Use unknown_change when the change is unclear. Do not include markdown unless the caller explicitly asks for it.
 """
 
